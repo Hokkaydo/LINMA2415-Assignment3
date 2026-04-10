@@ -252,11 +252,13 @@ def solve_uc(data, is_binary=True):
     prob.solve(solver=cp.GUROBI, verbose=False, MIPGap=1e-4, TimeLimit=120)
     if prob.status not in ("optimal", "optimal_inaccurate"):
         raise RuntimeError(f"UC failed: {prob.status}")
-    u_val = [np.round(ug[g].value).astype(int) for g in range(G)]
+    lmb = -gen_c[0].dual_value
+    mu  = -gen_c[1].dual_value
+    u_val =  [ug[g].value for g in range(G)]
     pg_val = [pg[g].value for g in range(G)]
     pw_val = [pw[w].value for w in range(W)]
     print(f"    Status: {prob.status}   Cost: ${prob.value:,.2f}")
-    return prob.value, u_val, pg_val, pw_val
+    return prob.value, u_val, pg_val, pw_val, lmb, mu
 
 
 # Economic dispatch 
@@ -282,14 +284,17 @@ def solve_economic_dispatch(data, u_fixed):
     
     cstrs = []
     u_fixed = np.array(u_fixed)
-    bal_c = cp.sum(pg, axis=0) + u_fixed.T @ Pmin + cp.sum(pw, axis=0) == data["demand"]
+    bal_c = []
     for t in range(T):
         cb = cp.sum(pg[:, t]) + u_fixed[:, t].T @ Pmin + cp.sum(pw[:, t]) == data["demand"][t]
         bal_c.append(cb)
     cstrs += bal_c
 
-    res_c = cp.sum(rg, axis=0) >= data["reserves"]
-    cstrs += [res_c]
+    res_c = []
+    for t in range(T):
+        cr = (cp.sum(rg[:, t]) >= data["reserves"][t])
+        res_c.append(cr)
+    cstrs += res_c
 
     for g in range(G):
         ug = u_fixed[g]
@@ -327,7 +332,7 @@ def solve_economic_dispatch(data, u_fixed):
     pg_val = [pg[g].value for g in range(G)]
     pw_val = [pw[w].value for w in range(W)]
 
-    lam, mu = -np.array([c.dual_value for c in bal_c]), -res_c.dual_value
+    lam, mu = -np.array([c.dual_value for c in bal_c]), -np.array([c.dual_value for c in res_c])
     print(f"    Status: {prob.status}   Cost: ${prob.value:,.2f}")
     return prob.value, pg_val, pw_val, lam, mu
 
@@ -482,7 +487,7 @@ def plot_part1(data, u_uc, pg_uc, pw_uc, pg_ed, pw_ed, cost_uc, cost_ed, save_pa
     G_sorted  = sorted(range(G), key=lambda g: u_uc[g].sum(), reverse=True)
  
     # Pre-aggregate renewable totals
-    ren_uc = sum(pw_uc)
+    ren_uc = np.sum(pw_uc, axis=0) if W > 0 else np.zeros(T)
     ren_ed = sum(pw_ed)
     ren_label = f"Renewables ({W} source{'s' if W > 1 else ''})"
  
@@ -704,7 +709,7 @@ def main():
 
     # Part 1
     print("\n" + "─" * 70 + "\n  PART 1 - UC vs ED")
-    cost_uc, u_uc, pg_uc, pw_uc = solve_uc(data)  
+    cost_uc, u_uc, pg_uc, pw_uc, lmb_uc, mu_uc = solve_uc(data)  
     # profit for each generator
     print("\n    Generator profits at UC solution:")
     cost_ed, pg_ed, pw_ed, lmb_mp, mu_mp = solve_economic_dispatch(data, u_uc)
@@ -714,8 +719,7 @@ def main():
     plot_part1(data, u_uc, pg_uc, pw_uc, pg_ed, pw_ed, cost_uc, cost_ed, save_path=args.save_path)
     
     print("\n" + "─"*70 + "\n  PART 2 – MP vs ACHP + LOC")
-    cost_achp, u_achp, pg_achp, pw_achp = solve_uc(data, is_binary=False)
-    cost_achp, pg_achp, pw_achp, lmb_achp, mu_achp = solve_economic_dispatch(data, u_achp)    
+    cost_achp, u_achp, pg_achp, pw_achp, lmb_achp, mu_achp = solve_uc(data, is_binary=False)
     print(f"    λ_MP   : {lmb_mp.min():.3f} – {lmb_mp.max():.3f} $/MWh")
     print(f"    λ_ACHP : {lmb_achp.min():.3f} – {lmb_achp.max():.3f} $/MWh")
     
