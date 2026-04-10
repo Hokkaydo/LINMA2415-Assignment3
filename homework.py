@@ -250,7 +250,7 @@ def solve_uc(data, is_binary=True):
 
     prob = cp.Problem(cp.Minimize(objective), gen_c)
     print(f"  Solving UC ({'MILP' if is_binary else 'LP relaxation'}) ...")
-    prob.solve(solver=cp.GUROBI, verbose=False, MIPGap=1e-4, TimeLimit=120)
+    prob.solve(solver=cp.HIGHS, verbose=False, iis_time_limit=120)
     if prob.status not in ("optimal", "optimal_inaccurate"):
         raise RuntimeError(f"UC failed: {prob.status}")
     if is_binary:
@@ -346,6 +346,8 @@ def solve_economic_dispatch(data, u_fixed):
 C = {"UC": "#1565C0", "ED": "#E65100"}
 CLASS_COLOR = {"base": "#1A237E", "mid": "#1B5E20", "peak": "#B71C1C",
                "renewable": "#F57F17"}
+C_MP   = "#2E7D32"
+C_ACHP = "#6A1B9A"
  
  
 def distinct_colors(n):
@@ -457,7 +459,7 @@ def optimal_single_unit_profit(data, g_idx, lam, is_binary=True):
  
     # min cost − revenue = - max profit
     prob = cp.Problem(cp.Minimize(cost_obj - revenue), op_cstrs)
-    prob.solve(solver=cp.GUROBI, verbose=False, TimeLimit=120, MIPGap=1e-4)
+    prob.solve(solver=cp.HIGHS, verbose=False, iis_time_limit=120)
  
     if prob.status in ("optimal", "optimal_inaccurate"):
         return -float(prob.value)
@@ -693,6 +695,142 @@ def plot_part1(data, u_uc, pg_uc, pw_uc, pg_ed, pw_ed, cost_uc, cost_ed, save_pa
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"{save_path} saved")
+    
+def plot_part2(data, lam_mp, mu_mp, lam_achp, mu_achp,
+               loc_mp, loc_achp, profits_uc_mp, profits_uc_achp,
+               save_path):
+    """
+    Four-panel Part 2 figure — no per-generator bars.
+ 
+    (a) Energy prices λ_t  MP vs ACHP  +  demand on right axis
+    (b) Reserve prices μ_t  MP vs ACHP
+    (c) Total LOC over time: cumulative LOC paid out up to period t
+        under MP and ACHP (uses the per-period profit shortfall, not total)
+        with a bar showing per-period load as context
+    (d) Revenue-adequacy summary:
+        stacked bar showing, for each pricing method:
+          • generators with positive profit (revenue-adequate)
+          • generators with zero or negative profit (need uplift)
+        — aggregated totals, not per-generator
+    """
+    T  = data["T"]
+    G  = data["G"]
+    tt = np.arange(1, T + 1)
+ 
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Part 2 – Marginal Prices vs Approximate Convex Hull Prices",
+                 fontsize=13, fontweight="bold")
+    plt.subplots_adjust(hspace=0.44, wspace=0.36)
+ 
+    # ── (a) Energy prices + demand overlay ───────────────────────────────────
+    ax  = axes[0, 0]
+    ax.plot(tt, lam_mp,   color=C_MP,   lw=2, marker="o", ms=5,
+            label=f"MP  λ  (mean={lam_mp.mean():.2f})")
+    ax.plot(tt, lam_achp, color=C_ACHP, lw=2, marker="s", ms=5, ls="--",
+            label=f"ACHP λ  (mean={lam_achp.mean():.2f})")
+    ax.set(xlabel="Period", ylabel="Price  ($/MWh)", title="Energy Prices λ(t)")
+    ax.legend(fontsize=8); ax.grid(alpha=0.25)
+    ax.xaxis.set_major_locator(mticker.MultipleLocator(1))
+ 
+    # Shade the gap between the two price curves
+    ax.fill_between(tt, lam_mp, lam_achp,
+                    where=(lam_achp >= lam_mp), alpha=0.12, color=C_ACHP,
+                    label="ACHP premium")
+    ax.fill_between(tt, lam_mp, lam_achp,
+                    where=(lam_achp < lam_mp), alpha=0.12, color=C_MP)
+ 
+    # Demand on right axis
+    ax2 = ax.twinx()
+    ax2.fill_between(tt, data["demand"], alpha=0.07, color="gray")
+    ax2.set_ylabel("Demand (MW)", color="gray", fontsize=8)
+    ax2.tick_params(axis="y", labelcolor="gray", labelsize=7)
+    ax2.set_ylim(0, data["demand"].max() * 2.5)
+ 
+    # ── (b) Reserve prices ────────────────────────────────────────────────────
+    ax = axes[0, 1]
+    ax.plot(tt, mu_mp,   color=C_MP,   lw=2, marker="o", ms=5, label="MP  μ")
+    ax.plot(tt, mu_achp, color=C_ACHP, lw=2, marker="s", ms=5, ls="--", label="ACHP μ")
+    ax.axhline(0, color="k", lw=0.6, ls=":")
+    ax.set(xlabel="Period", ylabel="Price  ($/MWh)", title="Reserve Prices μ(t)")
+    ax.legend(fontsize=8); ax.grid(alpha=0.25)
+    ax.xaxis.set_major_locator(mticker.MultipleLocator(1))
+ 
+    # ── (c) Per-period revenue shortfall (make-whole need) ───────────────────
+    # For each period t, how much profit shortfall exists across all generators?
+    # This is a proxy for "when" uplift payments arise, not just the total.
+    # We compute it as: shortfall_t = Σ_g max(0, -π_g^UC_t(λ)) where
+    # per-period profit π_g^UC_t = lam[t]*(pg[t]+Pmin*u[t]) - period_cost_t
+    # We approximate with:  shortfall_t = max(0, total_cost_t - total_revenue_t)
+    # using the aggregate values we already have.
+    #
+    # Since we only have total profits (not per-period), we show the cumulative
+    # LOC alongside the demand to show WHERE in time the shortfall concentrates.
+    ax  = axes[1, 0]
+    ax2 = ax.twinx()
+ 
+    # Aggregate LOC split into positive/zero per generator class
+    gen_class = classify(G, [np.zeros(T, int)] * G)  # placeholder — use profits
+    n_need_mp   = sum(1 for p in profits_uc_mp   if p < 0)
+    n_need_achp = sum(1 for p in profits_uc_achp if p < 0)
+ 
+    total_mp   = sum(loc_mp)
+    total_achp = sum(loc_achp)
+ 
+    bar_w = 0.35
+    x     = np.array([0, 1])
+    totals = [total_mp, total_achp]
+    colors = [C_MP, C_ACHP]
+    labels = [f"MP\n${total_mp:,.0f}\n({n_need_mp}/{G} need uplift)",
+              f"ACHP\n${total_achp:,.0f}\n({n_need_achp}/{G} need uplift)"]
+ 
+    bars = ax.bar(x, totals, width=0.5, color=colors, alpha=0.82, edgecolor="k", lw=0.7)
+    for bar, val, lbl in zip(bars, totals, labels):
+        ax.text(bar.get_x() + bar.get_width()/2,
+                bar.get_height() + max(totals) * 0.02,
+                f"${val:,.0f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
+ 
+    ax.set_xticks(x)
+    ax.set_xticklabels(["MP", "ACHP"], fontsize=11)
+    ax.set(ylabel="Total LOC  ($)", title="Total Make-Whole Uplift Required")
+    ax.grid(axis="y", alpha=0.25)
+    # Arrow showing the reduction
+    if total_achp < total_mp:
+        reduction = total_mp - total_achp
+        ax.annotate(
+            f"−${reduction:,.0f}\n({100*reduction/max(total_mp,1):.1f}% reduction)",
+            xy=(1, total_achp), xytext=(1.35, (total_mp + total_achp) / 2),
+            fontsize=8, color="darkgreen", fontweight="bold",
+            arrowprops=dict(arrowstyle="->", color="darkgreen", lw=1.2),
+        )
+ 
+    # ── (d) Generator profit distribution (histogram) ─────────────────────────
+    ax = axes[1, 1]
+ 
+    bins = np.linspace(
+        min(min(profits_uc_mp), min(profits_uc_achp)),
+        max(max(profits_uc_mp), max(profits_uc_achp)),
+        20
+    )
+    ax.hist(profits_uc_mp,   bins=bins, color=C_MP,   alpha=0.55, label="MP",   edgecolor="white", lw=0.4)
+    ax.hist(profits_uc_achp, bins=bins, color=C_ACHP, alpha=0.55, label="ACHP", edgecolor="white", lw=0.4)
+    ax.axvline(0, color="k", lw=1.2, ls="--", label="Break-even")
+ 
+    # Shade the loss region
+    ymax = ax.get_ylim()[1]
+    ax.axvspan(bins[0], 0, alpha=0.06, color="red")
+    ax.text(bins[0]*0.5, ymax*0.8, "Revenue\nshortfall\n(needs uplift)",
+            ha="center", fontsize=7, color="red", alpha=0.7)
+ 
+    ax.set(xlabel="Profit per generator ($)",
+           ylabel="Number of generators",
+           title="Distribution of Generator Profits at UC Schedule")
+    ax.legend(fontsize=8)
+    ax.grid(axis="y", alpha=0.25)
+ 
+    p = os.path.join(save_path, "part2_prices_loc.pdf")
+    plt.savefig(p, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"{p} saved")
 
 def main():
     
@@ -729,10 +867,14 @@ def main():
     print(f"    λ_MP   : {lmb_mp.min():.3f} – {lmb_mp.max():.3f} $/MWh")
     print(f"    λ_ACHP : {lmb_achp.min():.3f} – {lmb_achp.max():.3f} $/MWh")
     
-    loc_uc, profits_uc, profits_opt_uc, total_loc_uc =          compute_loc(data, u_uc, pg_uc, lmb_mp, label="UC")
+    loc_mp, profits_mp, profits_opt_mp, total_loc_mp =          compute_loc(data, u_uc, pg_uc, lmb_mp, label="MP")
     loc_achp, profits_achp, profits_opt_achp, total_loc_achp =  compute_loc(data, u_uc, pg_uc, lmb_achp, label="ACHP")
  
-    print(f"    {'TOTAL LOC':>6}  {total_loc_uc:>12,.2f}  {total_loc_achp:>14,.2f}")
+    print(f"    {'TOTAL LOC':>6}  {total_loc_mp:>12,.2f}  {total_loc_achp:>14,.2f}")
+    
+    plot_part2(data, lmb_mp, mu_mp, lmb_achp, mu_achp,
+               loc_mp, loc_achp, profits_mp, profits_achp,
+               save_path=args.save_path)
     
 if __name__ == "__main__":
     main()
