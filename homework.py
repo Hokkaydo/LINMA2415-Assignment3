@@ -1,5 +1,6 @@
 import os
 import json
+from charset_normalizer import is_binary
 import numpy as np
 import cvxpy as cp
 import pandas as pd
@@ -248,15 +249,20 @@ def solve_uc(data, is_binary=True):
     gen_c, objective = uc_constraints(data, cg, pg, pw, rg, ug, vg, wg, dg, lg)
 
     prob = cp.Problem(cp.Minimize(objective), gen_c)
-    print("  Solving UC (MILP) ...")
+    print(f"  Solving UC ({'MILP' if is_binary else 'LP relaxation'}) ...")
     prob.solve(solver=cp.GUROBI, verbose=False, MIPGap=1e-4, TimeLimit=120)
     if prob.status not in ("optimal", "optimal_inaccurate"):
         raise RuntimeError(f"UC failed: {prob.status}")
-    lmb = -gen_c[0].dual_value
-    mu  = -gen_c[1].dual_value
-    u_val =  [ug[g].value for g in range(G)]
-    pg_val = [pg[g].value for g in range(G)]
-    pw_val = [pw[w].value for w in range(W)]
+    if is_binary:
+        # milp has no dual variables
+        lmb, mu = None, None
+    else:
+        lmb = -gen_c[0].dual_value
+        mu  = -gen_c[1].dual_value
+    u_val   =  [np.round(ug[g].value).astype(int) if is_binary
+              else ug[g].value for g in range(G)]
+    pg_val  = [pg[g].value for g in range(G)]
+    pw_val  = [pw[w].value for w in range(W)]
     print(f"    Status: {prob.status}   Cost: ${prob.value:,.2f}")
     return prob.value, u_val, pg_val, pw_val, lmb, mu
 
@@ -709,7 +715,7 @@ def main():
 
     # Part 1
     print("\n" + "─" * 70 + "\n  PART 1 - UC vs ED")
-    cost_uc, u_uc, pg_uc, pw_uc, lmb_uc, mu_uc = solve_uc(data)  
+    cost_uc, u_uc, pg_uc, pw_uc, _, _ = solve_uc(data)  
     # profit for each generator
     print("\n    Generator profits at UC solution:")
     cost_ed, pg_ed, pw_ed, lmb_mp, mu_mp = solve_economic_dispatch(data, u_uc)
