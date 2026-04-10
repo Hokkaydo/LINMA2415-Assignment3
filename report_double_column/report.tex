@@ -1,0 +1,101 @@
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND OTHER DOCUMENT CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\documentclass[
+	a4paper,
+	10pt,
+	unnumberedsections,
+	twoside,
+]{LTJournalArticle}
+
+\usepackage{amsmath}
+\usepackage{amsfonts,amssymb}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{eurosym}
+\usepackage{mathtools}
+\usepackage{siunitx}
+\usepackage{cancel}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{green!50!black},
+    numbers=left,
+    numberstyle=\tiny,
+    breaklines=true,
+    frame=single
+}
+
+% \addbibresource{sample.bib}
+
+\runninghead{LINMA2415 --- Assignment 3}
+
+\footertext{}
+
+\setcounter{page}{1}
+
+%----------------------------------------------------------------------------------------
+%	TITLE SECTION
+%----------------------------------------------------------------------------------------
+
+\title{LINMA2415 --- Assignment 3 \\ Unit Commitment and Pricing with Nonconvexities:\\ A case study of PJM}
+
+\author{%
+	Alexandre Orékhoff (54552100)
+}
+
+\renewcommand{\maketitlehookd}{%
+    % \begin{abstract}
+    %     This report solves a DC Optimal Power Flow (DCOPF) problem on a simplified Belgian transmission grid (23 buses, 62 generators), and analyzes transmission-constrained electricity markets under nodal and zonal pricing. A Value of Lost Load of \num{3000}\,\euro/MWh is assumed.
+    % \end{abstract}
+}
+
+%----------------------------------------------------------------------------------------
+
+\begin{document}
+
+\maketitle
+
+%----------------------------------------------------------------------------------------
+%	ARTICLE CONTENTS
+%----------------------------------------------------------------------------------------
+
+\section{Unit Commitment vs Economic Dispatch}
+
+\subsection{Economic Dispatch Simplifications}
+
+The unit commitment model takes the on/off state of generators into account and is thus a Mixed Integer Linear Programming. The economic dispatch model consider these known. Transitioning from the unit commitment model to the economic dispatch model requires to remove binary variables dictating the change in generators' state, transforming the model from a MILP problem to a pure LP problem. We consider $u_g(t)=1\ \forall t\in\mathcal T$. We also remove the startup/shutdown cost and time constraints and ramping constraints, fixing $v_g(t)=w_g(t)=0\ \forall t$. This removes most of the UC problem constraints, and simplifies the remaining one as well as the objective function.
+
+
+%----------------------------------------------------------------------------------------
+%	REFERENCES
+%----------------------------------------------------------------------------------------
+
+% \printbibliography
+
+%----------------------------------------------------------------------------------------
+
+\newpage
+\onecolumn
+\appendix
+
+\section{Figures}
+
+\begin{figure}[!ht]
+    \centering
+    % \includegraphics[width=\linewidth]{figures/q3_nodal_prices.pdf}
+    \caption{}
+\end{figure}
+
+\section{Code}
+
+\begin{lstlisting}[language=Python, caption=Data loading and preprocessing]
+\end{lstlisting}
+
+\end{document}
