@@ -43,7 +43,53 @@ import os, json, re
 import numpy as np
 import pandas as pd
 from pathlib import Path
+import threading
 
+def worker(path, homework_module, T_max, results):
+    # run data collection for each instance with threading to speed up
+    hw = homework_module
+    key = path.stem          # e.g.  "2015-01-01_hw"
+    print(f"{key}    ... processing {path.name}")
+    try:
+        data = hw.parse_json(str(path), T_max=T_max)
+        T, G, W = data["T"], data["G"], data["W"]
+
+        # UC (MILP)
+        cost_uc, u_uc, pg_uc, pw_uc, _, _ = hw.solve_uc(data, is_binary=True)
+
+        # ED (MP prices)
+        cost_ed, pg_ed, pw_ed, lam_mp, mu_mp = hw.solve_economic_dispatch(data, u_uc)
+
+        # LP relaxation (ACHP prices)
+        cost_lp, _, _, _, lam_achp, mu_achp = hw.solve_uc(data, is_binary=False)
+
+        # LOC under both pricing methods (always evaluated on binary u_uc)
+        loc_mp,   profits_uc_mp,   _, _ = hw.compute_loc(data, u_uc, pg_uc, lam_mp)
+        loc_achp, profits_uc_achp, _, _ = hw.compute_loc(data, u_uc, pg_uc, lam_achp)
+
+        results[key] = dict(
+            cost_uc        = float(cost_uc),
+            cost_ed        = float(cost_ed),
+            cost_lp        = float(cost_lp),
+            lam_mp         = lam_mp.tolist(),
+            lam_achp       = lam_achp.tolist(),
+            mu_mp          = mu_mp.tolist(),
+            mu_achp        = mu_achp.tolist(),
+            loc_mp         = loc_mp,
+            loc_achp       = loc_achp,
+            profits_uc_mp  = profits_uc_mp,
+            profits_uc_achp= profits_uc_achp,
+            u_uc           = [u.tolist() for u in u_uc],
+            demand         = data["demand"].tolist(),
+            reserves       = data["reserves"].tolist(),
+            G=G, W=W, T=T,
+        )
+        print(f"{key}    ✓  UC=${cost_uc:,.0f}  ED=${cost_ed:,.0f}  "
+                f"LOC_MP=${sum(loc_mp):,.0f}  LOC_ACHP=${sum(loc_achp):,.0f}")
+
+    except Exception as e:
+        print(f"{key}    ✗  FAILED: {e}")
+        raise e
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  1.  COLLECT RESULTS  (runs homework.py on each instance)
@@ -73,51 +119,16 @@ def collect_results(instances_dir, homework_module, T_max=12, save_path=None):
     jsons = sorted(Path(instances_dir).glob("*.json"))
     print(f"Found {len(jsons)} instance files.")
 
+    threads = []
     for path in jsons:
-        key = path.stem          # e.g.  "2015-01-01_hw"
-        print(f"\n{'─'*60}")
-        print(f"  Processing: {key}")
+        # launch a thread per instance
+        t = threading.Thread(target=worker, args=(path, hw, T_max, results))
+        t.start()
+        threads.append(t)
 
-        try:
-            data = hw.parse_json(str(path), T_max=T_max)
-            T, G, W = data["T"], data["G"], data["W"]
-
-            # UC (MILP)
-            cost_uc, u_uc, pg_uc, pw_uc, _, _ = hw.solve_uc(data, is_binary=True)
-
-            # ED (MP prices)
-            cost_ed, pg_ed, pw_ed, lam_mp, mu_mp = hw.solve_economic_dispatch(data, u_uc)
-
-            # LP relaxation (ACHP prices)
-            cost_lp, _, _, _, lam_achp, mu_achp = hw.solve_uc(data, is_binary=False)
-
-            # LOC under both pricing methods (always evaluated on binary u_uc)
-            loc_mp,   profits_uc_mp,   _, _ = hw.compute_loc(data, u_uc, pg_uc, lam_mp)
-            loc_achp, profits_uc_achp, _, _ = hw.compute_loc(data, u_uc, pg_uc, lam_achp)
-
-            results[key] = dict(
-                cost_uc        = float(cost_uc),
-                cost_ed        = float(cost_ed),
-                cost_lp        = float(cost_lp),
-                lam_mp         = lam_mp.tolist(),
-                lam_achp       = lam_achp.tolist(),
-                mu_mp          = mu_mp.tolist(),
-                mu_achp        = mu_achp.tolist(),
-                loc_mp         = loc_mp,
-                loc_achp       = loc_achp,
-                profits_uc_mp  = profits_uc_mp,
-                profits_uc_achp= profits_uc_achp,
-                u_uc           = [u.tolist() for u in u_uc],
-                demand         = data["demand"].tolist(),
-                reserves       = data["reserves"].tolist(),
-                G=G, W=W, T=T,
-            )
-            print(f"    ✓  UC=${cost_uc:,.0f}  ED=${cost_ed:,.0f}  "
-                  f"LOC_MP=${sum(loc_mp):,.0f}  LOC_ACHP=${sum(loc_achp):,.0f}")
-
-        except Exception as e:
-            print(f"    ✗  FAILED: {e}")
-            raise e
+    # Wait for all threads to complete
+    for t in threads:
+        t.join()
 
     if save_path:
         with open(save_path, "w") as f:
