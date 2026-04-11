@@ -16,73 +16,72 @@ def parse_json(path, T_max):
     T_all = int(raw.get("time_periods", T_max))
     T = min(T_all, T_max)
 
-    demand = np.array(raw.get("demand", 0.0), dtype=float)[:T]
-    reserves = np.array(raw.get("reserves", 0.0), dtype=float)[:T]
+    demand      = np.array(raw.get("demand",   0.0), dtype=float).flatten()[:T]
+    reserves    = np.array(raw.get("reserves", 0.0), dtype=float).flatten()[:T]
 
     thermal_generators = []
     for i, (gname, g) in enumerate(raw.get("thermal_generators", {}).items()):
-        name = g.get("name", gname)
-        must_run = int(g.get("must_run", 0)) == 1
-        power_output_minimum = g.get("power_output_minimum", 0.0)
-        power_output_maximum = g.get("power_output_maximum", 0.0)
-        pwl_mw = [float(pwl["mw"]) for pwl in g.get("piecewise_production", [])]
-        pwl_cost = [float(pwl["cost"]) for pwl in g.get("piecewise_production", [])]
-        ramp_up_limit = float(g.get("ramp_up_limit", 0.0))
-        ramp_down_limit = float(g.get("ramp_down_limit", 0.0))
-        ramp_startup_limit = float(g.get("ramp_startup_limit", 0.0))
-        ramp_shutdown_limit = float(g.get("ramp_shutdown_limit", 0.0))
-        time_up_minimum = int(g.get("time_up_minimum", 0))
-        time_down_minimum = int(g.get("time_down_minimum", 0))
-        power_output_t0 = float(g.get("power_output_t0", 0.0))
-        unit_on_t0 = int(g.get("unit_on_t0", 0))
-        time_up_t0 = int(g.get("time_up_t0", 0))
-        time_down_t0 = int(g.get("time_down_t0", 0))
-
-        startup_lag = [int(s.get("lag", 0)) for s in g.get("startup", [])]
-        startup_cost = [float(s.get("cost", 0.0)) for s in g.get("startup", [])]
+        name                    = g.get("name", gname)
+        must_run                = int(g.get("must_run", 0)) == 1
+        power_output_minimum    = float(g.get("power_output_minimum", 0.0))
+        power_output_maximum    = float(g.get("power_output_maximum", 0.0))
+        pwl_mw                  = [float(pwl["mw"]) for pwl in g.get("piecewise_production", [])]
+        pwl_cost                = [float(pwl["cost"]) for pwl in g.get("piecewise_production", [])]
+        ramp_up_limit           = float(g.get("ramp_up_limit", 0.0))
+        ramp_down_limit         = float(g.get("ramp_down_limit", 0.0))
+        ramp_startup_limit      = float(g.get("ramp_startup_limit", 0.0))
+        ramp_shutdown_limit     = float(g.get("ramp_shutdown_limit", 0.0))
+        time_up_minimum         = int(g.get("time_up_minimum", 0))
+        time_down_minimum       = int(g.get("time_down_minimum", 0))
+        power_output_t0         = float(g.get("power_output_t0", 0.0))
+        unit_on_t0              = int(g.get("unit_on_t0", 0))
+        time_up_t0              = int(g.get("time_up_t0", 0))
+        time_down_t0            = int(g.get("time_down_t0", 0))
+        startup_lag             = [int(s.get("lag", 0)) for s in g.get("startup", [])]
+        startup_cost            = [float(s.get("cost", 0.0)) for s in g.get("startup", [])]
 
         thermal_generators.append(dict(
             idx=i,
-            must_run=must_run,
-            power_output_minimum=power_output_minimum,
-            power_output_maximum=power_output_maximum,
-            pwl_mw=pwl_mw,
-            pwl_cost=pwl_cost,
-            ramp_up_limit=ramp_up_limit,
-            ramp_down_limit=ramp_down_limit,
-            ramp_startup_limit=ramp_startup_limit,
-            ramp_shutdown_limit=ramp_shutdown_limit,
-            time_up_minimum=time_up_minimum,
-            time_down_minimum=time_down_minimum,
-            power_output_t0=power_output_t0,
-            unit_on_t0=unit_on_t0,
-            time_up_t0=time_up_t0,
-            time_down_t0=time_down_t0,
-            startup_lag=startup_lag,
-            startup_cost=startup_cost,
-            name=name,
+            must_run                = must_run,
+            power_output_minimum    = power_output_minimum,
+            power_output_maximum    = power_output_maximum,
+            pwl_mw                  = pwl_mw,
+            pwl_cost                = pwl_cost,
+            ramp_up_limit           = ramp_up_limit,
+            ramp_down_limit         = ramp_down_limit,
+            ramp_startup_limit      = ramp_startup_limit,
+            ramp_shutdown_limit     = ramp_shutdown_limit,
+            time_up_minimum         = time_up_minimum,
+            time_down_minimum       = time_down_minimum,
+            power_output_t0         = power_output_t0,
+            unit_on_t0              = unit_on_t0,
+            time_up_t0              = time_up_t0,
+            time_down_t0            = time_down_t0,
+            startup_lag             = startup_lag,
+            startup_cost            = startup_cost,
+            name                    = name,
         ))
         
     renewable_generators = []
     for i, (gname, g) in enumerate(raw.get("renewable_generators", {}).items()):
         name = g.get("name", gname)
-        power_output_minimum = np.array(g.get("power_output_minimum", 0.0), dtype=float)[:T]
-        power_output_maximum = np.array(g.get("power_output_maximum", 0.0), dtype=float)[:T]
+        power_output_minimum = np.array(g.get("power_output_minimum", 0.0), dtype=float).flatten()[:T]
+        power_output_maximum = np.array(g.get("power_output_maximum", 0.0), dtype=float).flatten()[:T]
         renewable_generators.append(dict(
-            idx=i,
-            power_output_minimum=power_output_minimum,
-            power_output_maximum=power_output_maximum,
-            name=name,
+            idx                     = i,
+            power_output_minimum    = power_output_minimum,
+            power_output_maximum    = power_output_maximum,
+            name                    = name,
         ))
     
     return dict(
-        T=T, 
-        G=len(thermal_generators),
-        W=len(renewable_generators),
-        demand=demand, 
-        reserves=reserves, 
-        thermal_generators=pd.DataFrame(thermal_generators),
-        renewable_generators=pd.DataFrame(renewable_generators)
+        T                       = T, 
+        G                       = len(thermal_generators),
+        W                       = len(renewable_generators),
+        demand                  = demand, 
+        reserves                = reserves, 
+        thermal_generators      = pd.DataFrame(thermal_generators),
+        renewable_generators    = pd.DataFrame(renewable_generators)
     )
 
 # Unit commitment problem

@@ -89,7 +89,7 @@ def collect_results(instances_dir, homework_module, T_max=12, save_path=None):
             cost_ed, pg_ed, pw_ed, lam_mp, mu_mp = hw.solve_economic_dispatch(data, u_uc)
 
             # LP relaxation (ACHP prices)
-            cost_lp, lam_achp, mu_achp, _, _, _ = hw.solve_uc(data, is_binary=False)
+            cost_lp, _, _, _, lam_achp, mu_achp = hw.solve_uc(data, is_binary=False)
 
             # LOC under both pricing methods (always evaluated on binary u_uc)
             loc_mp,   profits_uc_mp,   _, _ = hw.compute_loc(data, u_uc, pg_uc, lam_mp)
@@ -117,6 +117,7 @@ def collect_results(instances_dir, homework_module, T_max=12, save_path=None):
 
         except Exception as e:
             print(f"    ✗  FAILED: {e}")
+            raise e
 
     if save_path:
         with open(save_path, "w") as f:
